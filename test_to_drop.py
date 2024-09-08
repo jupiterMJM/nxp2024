@@ -16,7 +16,7 @@ import time
 import numpy as np
 
 
-async def move_in_ned_with_velocity(drone:System, aiming_pos, velocity, tolerance=0.2):
+async def move_in_ned_with_velocity(drone:System, aiming_pos, velocity, tolerance=0.2, actualize=30):
     """
     aiming_pos: la position RELATIVE au drone actuellement sous (pos_sn, pos_we, pos_hb)
     cad que pour (x, y, z) le drone ira à x mètre vers le QUOI, y metre vers le QUOI, z metre vers le QUOI
@@ -25,26 +25,35 @@ async def move_in_ned_with_velocity(drone:System, aiming_pos, velocity, toleranc
     # on recupere les coordonnees initiales du drone
     async for position_ned in drone.telemetry.position_velocity_ned():
         drone_position_init = position_ned.position
+        drone_position_init = np.array([drone_position_init.north_m, drone_position_init.east_m, drone_position_init.down_m])
         break
-
-    drone_position_aim = (drone_position_init.north_m + aiming_pos[0], drone_position_init.east_m + aiming_pos[1], drone_position_init.down_m + aiming_pos[2])
-    
+    indic = 0
+    drone_position_aim = drone_position_init + np.array(aiming_pos)
+    vecteur_dir = np.array(aiming_pos)      # juste pour l'initialisation
     prev_time = time.time()
     # puis on boucle jusqu'à ce qu'on y soit
     async for position_ned in drone.telemetry.position_velocity_ned():
+        indic += 1
         drone_position_current = position_ned.position
         speed = position_ned.velocity
-        drone_position_current = np.array([drone_position_current.north_m, drone_position_current.east_m, drone_position_current.down_m])
-        vecteur_dir = np.array([drone_position_aim[i] - drone_position_current[i] for i in range(3)])
+        #drone_position_current = np.array([drone_position_current.north_m, drone_position_current.east_m, drone_position_current.down_m])
+        
         if np.linalg.norm(vecteur_dir) < tolerance:
             break
+
         vecteur_unit = vecteur_dir / np.linalg.norm(vecteur_dir)
 
-        # puis on dirige le groupe
-        dt = time.time() - prev_time
-        next_position = drone_position_current + vecteur_unit * velocity
+        next_position = drone_position_init + vecteur_unit*velocity*(time.time()-prev_time)
+
         await drone.offboard.set_position_ned(PositionNedYaw(next_position[0], next_position[1], next_position[2], 0.0))
-        prev_time = time.time()
+
+        if indic % actualize == 0:
+            print("[INFO] Actualisation!!!!!")
+            indic = 0
+            prev_time = time.time()
+            drone_position_init = np.array([drone_position_current.north_m, drone_position_current.east_m, drone_position_current.down_m])
+            vecteur_dir = drone_position_aim - drone_position_init
+
 
 
 
