@@ -28,7 +28,7 @@ async def move_in_ned_with_velocity(drone:System, aiming_pos, velocity, toleranc
         break
 
     drone_position_aim = (drone_position_init.north_m + aiming_pos[0], drone_position_init.east_m + aiming_pos[1], drone_position_init.down_m + aiming_pos[2])
-
+    
     prev_time = time.time()
     # puis on boucle jusqu'à ce qu'on y soit
     async for position_ned in drone.telemetry.position_velocity_ned():
