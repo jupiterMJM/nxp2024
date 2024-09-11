@@ -18,6 +18,7 @@ import time
 import numpy as np
 import json
 
+on_drone_reel = True
 
 async def move_in_ned_with_velocity(drone:System, aiming_pos, velocity, tolerance=0.2, save_trajectory=True):
     """
@@ -75,7 +76,10 @@ async def run():
     """ Does Offboard control using position NED coordinates. """
 
     drone = System()
-    await drone.connect(system_address="udp://:14540")
+    if not on_drone_reel:
+        await drone.connect(system_address="udp://:14540")
+    else:
+        await drone.connect(system_address="serial:///dev/ttyAMA0:57600")
 
     print("Waiting for drone to connect...")
     async for state in drone.core.connection_state():
@@ -110,7 +114,7 @@ async def run():
         return
 
     try:
-        await move_in_ned_with_velocity(drone, (-4, 2, -3), 10)
+        await move_in_ned_with_velocity(drone, (2, 2, 0), 2)
         await asyncio.sleep(3)
         print("-- Stopping offboard")
         await drone.offboard.stop()
