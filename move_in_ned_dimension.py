@@ -18,61 +18,73 @@ import time
 import numpy as np
 import json
 
-on_drone_reel = True
+on_drone_reel = False
+current_info = list()  # north_m, east_m, down_m, speed
+historic = {"north":list(), "east":list(), "down":list(), "speed":list()}
 
-async def move_in_ned_with_velocity(drone:System, aiming_pos, velocity, tolerance=0.2, save_trajectory=True):
+async def move_in_ned_with_velocity(drone:System, aiming_pos, velocity, tolerance=0.2, little_sleep = 0.1):
     """
     aiming_pos: la position RELATIVE au drone actuellement sous (pos_sn, pos_we, pos_hb)
     cad que pour (x, y, z) le drone ira à x mètre vers le QUOI, y metre vers le QUOI, z metre vers le QUOI
     le drone bougera avec une vitesse de velocity
     """
+    
     pattern_velocity = lambda x: velocity if x > 1 else 0.5
     # on recupere les coordonnees initiales du drone
-    async for position_ned in drone.telemetry.position_velocity_ned():
-        drone_position_init = position_ned.position
-        break
-    historic = {"north":list(), "east":list(), "down":list(), "speed":list()}
-    drone_position_aim = (drone_position_init.north_m + aiming_pos[0], drone_position_init.east_m + aiming_pos[1], drone_position_init.down_m + aiming_pos[2])
-    
+    get_position = lambda : current_info[:-1]
+    get_speed_norm = lambda : current_info[-1]
+
+    drone_position_init = get_position()
+    drone_position_aim = np.array(drone_position_init) + np.array(aiming_pos)
+    # on enregistre cette info même si save_traj==False (dans ce cas là, c'est juste que l'info ne sera pas enregistré)
+    historic["Info"] = [*drone_position_aim, velocity]
     prev_time = time.time()
     # puis on boucle jusqu'à ce qu'on y soit
-    async for position_ned in drone.telemetry.position_velocity_ned():
-        drone_position_current = position_ned.position
+    while True:
+        drone_position_current = np.array(get_position())
         
-        speed = np.array([position_ned.velocity.north_m_s, position_ned.velocity.east_m_s, position_ned.velocity.down_m_s])
-        drone_position_current = np.array([drone_position_current.north_m, drone_position_current.east_m, drone_position_current.down_m])
-        vecteur_dir = np.array([drone_position_aim[i] - drone_position_current[i] for i in range(3)])
+        speed = get_speed_norm()
+        vecteur_dir = drone_position_aim - drone_position_current
         distance_to_aim = np.linalg.norm(vecteur_dir)
-        print(np.linalg.norm(vecteur_dir))
+        print(distance_to_aim)
         if distance_to_aim < tolerance:
             await drone.offboard.set_position_ned(PositionNedYaw(drone_position_aim[0], drone_position_aim[1], drone_position_aim[2], 0.0))
             print("[INFO] Should be arrived")
             await asyncio.sleep(3)
-            if save_trajectory:
-                with open(f"trajectory.json", "w") as f:
-                    historic["Info"] = [*drone_position_aim, velocity]
-                    json.dump(historic, f)
-                print("[INFO] Trajectory saved")
             break
         vecteur_unit = vecteur_dir / np.linalg.norm(vecteur_dir)
 
         # puis on dirige le groupe
-        dt = time.time() - prev_time
         next_position = drone_position_current + vecteur_unit * pattern_velocity(distance_to_aim)
         await drone.offboard.set_position_ned(PositionNedYaw(next_position[0], next_position[1], next_position[2], 0.0))
-        prev_time = time.time()
-
-        if save_trajectory:
-            historic["north"].append(position_ned.position.north_m)
-            historic["east"].append(position_ned.position.east_m)
-            historic["down"].append(position_ned.position.down_m)
-            historic["speed"].append(np.linalg.norm(speed))
+        await asyncio.sleep(little_sleep)
 
 
+async def save_trajectory_in_ned(drone, save_traj=True, keep_one_on=2, backup=100):
+    """
+    :param: le backup est effectué tous les *backup* iterations
+    :param: on garde une donnée sur *keep_one_on*
+    """
+    global historic, current_info
+    indic = 0
+    async for position_ned in drone.telemetry.position_velocity_ned():
+        indic += 1
+        current_info = position_ned.position.north_m, position_ned.position.east_m, position_ned.position.down_m,np.linalg.norm(np.array([position_ned.velocity.north_m_s, position_ned.velocity.east_m_s, position_ned.velocity.down_m_s]))
+
+        if save_traj and indic % keep_one_on == 0:
+            historic["north"].append(current_info[0])
+            historic["east"].append(current_info[1])
+            historic["down"].append(current_info[2])
+            
+            historic["speed"].append(current_info[3])
+        if save_traj and indic % backup == 0:
+            with open(f"trajectory.json", "w") as f:
+                json.dump(historic, f)
+                print("[INFO] Trajectory saved (backup)")
+        
 
 
-
-async def run():
+async def run(save_trajectory=True):
     """ Does Offboard control using position NED coordinates. """
 
     drone = System()
@@ -96,16 +108,27 @@ async def run():
     print("-- Arming")
     await drone.action.arm()
 
+    if save_trajectory:
+        saving_traj = asyncio.ensure_future(save_trajectory_in_ned(drone))
+
+    
+
     print("--Take OFF")
     await drone.action.takeoff()
     await asyncio.sleep(10)
 
+    print("[INFO] Wait before offboard")
+    await asyncio.sleep(5)
+
     print("-- Setting initial setpoint")
-    await drone.offboard.set_position_ned(PositionNedYaw(0.0, 0.0, 0.0, 0.0))
+    await drone.offboard.set_position_ned(PositionNedYaw(*current_info[:-1], 0.0))
+
 
     print("-- Starting offboard")
     try:
         await drone.offboard.start()
+        print("[INFO] Offboard started, wait...")
+        await asyncio.sleep(5)
     except OffboardError as error:
         print(f"Starting offboard mode failed \
                 with error code: {error._result.result}")
@@ -126,6 +149,12 @@ async def run():
         
         async for in_air in drone.telemetry.in_air():
             if not in_air:
+                await asyncio.sleep(1)
+                if save_trajectory:
+                    saving_traj.cancel()
+                    with open(f"trajectory.json", "w") as f:
+                        json.dump(historic, f)
+                        print("[INFO] Trajectory saved (backup)")
                 print("[INFO] Disarming")
                 await drone.action.disarm()
                 return
