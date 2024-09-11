@@ -22,6 +22,7 @@ want_aruco = True #Variable globale qui nous dira si l'on doit chercher ou non u
 on_drone_reel = True        # Modifier cette variable pour passer sur simulateur!!!
 debuggage = True
 
+if debuggage: print("[WARNING] Mode débuggage activé, le drone ne décollera pas!!!")
 
 async def largage():
     GPIO.setmode(GPIO.BOARD) #Use Board numerotation mode
@@ -44,7 +45,6 @@ async def run(): #Fonction principale
         print("[INFO] SUR SIMULATEUR!!! tentative de connection")
         await drone.connect()
     print("[INFO] Waiting for drone to connect...")
-    asyncio.ensure_future(update_lidar(drone))
     if not debuggage:
         async for state in drone.core.connection_state():
             if state.is_connected:
@@ -53,7 +53,7 @@ async def run(): #Fonction principale
 
         #Calibration de l'altitude du RTL -> hyper important
         print('[INFO] Set Return to launch altitude')
-        await drone.action.set_return_to_launch_altitude(1)
+        await drone.action.set_return_to_launch_altitude(1)     # on monte de 1m quand on rtl
 
     if not debuggage:
 
@@ -61,7 +61,6 @@ async def run(): #Fonction principale
         #Verifie si le drone a fini sa mission /!\ ensure_future
         print('[INFO] Importing Mission')
         mission_import_data = await drone.mission_raw.import_qgroundcontrol_mission("mission1.plan")
-        print("Salut")
         print(f"{len(mission_import_data.mission_items)} mission items imported")
         await drone.mission_raw.upload_mission(mission_import_data.mission_items)
         print("[INFO] Mission uploaded")
@@ -112,7 +111,6 @@ async def mission_stop_aruco (drone : System):
             if ids is not None and ([2] in ids or [1] in ids or [3] in ids or [4] in ids): #verifie si l'aruco repere est le numero 2
                 want_aruco = False
                 image_with_markers = cv2.aruco.drawDetectedMarkers(frame.copy(), corners, ids)
-                out.write(image_with_markers) # Sauvegarde de l'image
                 cap.stop()
                 print('[INFO] Aruco Detected')
                 if not debuggage:
