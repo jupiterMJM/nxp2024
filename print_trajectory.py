@@ -5,6 +5,7 @@ from mpl_toolkits.mplot3d import Axes3D
 import matplotlib
 import numpy as np
 
+
 fig = plt.figure()
 ax = fig.add_subplot(111, projection='3d')
 
@@ -14,9 +15,10 @@ with open("trajectory.json", "r") as f:
 x, y, z = data["north"], data["east"], data["down"]  # for show
 c = data["speed"]  # create some colours
 
-
+z = list(map(lambda x: -x, z))
 
 p = ax.scatter(x, y, z, c=c, cmap=plt.cm.magma)
+ax.set_aspect('equal')
 ax.set_xlabel("North")
 ax.set_ylabel("East")
 ax.set_zlabel("Down")
@@ -24,7 +26,7 @@ ax.set_zlabel("Down")
 try:
     aim = data["Info"]
     print(aim)
-    ax.scatter(*aim[:-1], c="red")
+    ax.scatter(*aim[:-2], -aim[-2], c="red")
 except:
     pass
 
