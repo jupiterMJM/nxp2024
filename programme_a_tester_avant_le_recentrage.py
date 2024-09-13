@@ -31,15 +31,15 @@ async def run():
             print(f"[INFO] Connected to drone!")
             break
     
-    # #Programation de l'altitude voulue pour le décollage
-    # drone.action.set_takeoff_altitude(1.5)
+    #Programation de l'altitude voulue pour le décollage
+    drone.action.set_takeoff_altitude(1.5)
     
-    # print("[INFO] Arming")
-    # await drone.action.arm()
+    print("[INFO] Arming")
+    await drone.action.arm()
     
-    # #Décollage du drone
-    # print("[INFO] Taking off")
-    # await drone.action.takeoff()
+    #Décollage du drone
+    print("[INFO] Taking off")
+    await drone.action.takeoff()
 
     # await asyncio.sleep(5)
     #Test de hold dans le take_off, partie a cammenter si besoin

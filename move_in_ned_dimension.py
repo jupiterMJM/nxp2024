@@ -64,6 +64,26 @@ async def move_in_ned_with_velocity(drone:System, aiming_pos, velocity, toleranc
         await drone.offboard.set_position_ned(PositionNedYaw(next_position[0], next_position[1], next_position[2], 0.0))
         await asyncio.sleep(little_sleep)
 
+async def move_in_frd_with_velocity(drone:System, aiming_pos, velocity, tolerance=0.2, little_sleep=0.1):
+    """
+    fonction permettant de controler le drone dans sa base locale (Forward, Right, Down)
+    fonction testée et approuvée sous simulateur
+    :comment: on change les coord de base
+        de FRD à NED
+    """
+    # obtention de l'angle phi entre l'axe nord et l'axe forward
+    async for heading_data in drone.telemetry.heading():
+        phi = np.deg2rad(heading_data.heading_deg)
+        break   # on a besoin de la donnée qu'une seule fois
+
+    # chgt de base
+    along_north_axis = aiming_pos[0] * np.cos(phi) - aiming_pos[1] * np.sin(phi)
+    along_east_axis = aiming_pos[0] * np.sin(phi) + aiming_pos[1] * np.cos(phi)
+
+    # envoi de la commande à la fonction move_in_ned_with_velocity
+    await move_in_ned_with_velocity(drone, (along_north_axis, along_east_axis, aiming_pos[2]), velocity, tolerance, little_sleep)
+    
+
 
 async def save_trajectory_in_ned(drone, save_traj=True, keep_one_on=1, backup=100):
     """
@@ -120,7 +140,7 @@ async def run(save_trajectory=True, land_on_point=False):
     print("[INFO] Arming")
     await drone.action.arm()
 
-    saving_traj = asyncio.ensure_future(save_trajectory_in_ned(drone, save_traj=save_trajectory))
+    saving_traj_ensure_fut_task = asyncio.ensure_future(save_trajectory_in_ned(drone, save_traj=save_trajectory))
     await asyncio.sleep(2)
     
 
@@ -132,7 +152,7 @@ async def run(save_trajectory=True, land_on_point=False):
     await asyncio.sleep(5)
 
     print("[INFO] Setting initial setpoint")
-    await drone.offboard.set_position_ned(PositionNedYaw(*current_info[:-1], 0.0))
+    await drone.offboard.set_position_ned(PositionNedYaw(*current_info[:-1], 0))
 
 
     print("[INFO] Starting offboard")
@@ -148,7 +168,7 @@ async def run(save_trajectory=True, land_on_point=False):
         return
 
     try:
-        await move_in_ned_with_velocity(drone, where_to_go, speed_when_move)
+        await move_in_frd_with_velocity(drone, where_to_go, speed_when_move)
         await asyncio.sleep(3)
         print("-- Stopping offboard")
         await drone.offboard.stop()
@@ -168,7 +188,7 @@ async def run(save_trajectory=True, land_on_point=False):
             if not in_air:
                 await asyncio.sleep(1)
                 if save_trajectory:
-                    saving_traj.cancel()
+                    saving_traj_ensure_fut_task.cancel()
                     with open(f"trajectory.json", "w") as f:
                         json.dump(historic, f)
                         print("[INFO] Trajectory saved (backup)")
