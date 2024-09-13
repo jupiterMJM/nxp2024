@@ -74,6 +74,8 @@ async def save_trajectory_in_ned(drone, save_traj=True, keep_one_on=1, backup=10
     indic = 0
     async for position_ned in drone.telemetry.position_velocity_ned():
         indic += 1
+        if indic < 10:
+            print(f"[TEST URGENT] {indic}e  donnée prise")
         current_info = position_ned.position.north_m, position_ned.position.east_m, position_ned.position.down_m,np.linalg.norm(np.array([position_ned.velocity.north_m_s, position_ned.velocity.east_m_s, position_ned.velocity.down_m_s]))
 
         if save_traj and indic % keep_one_on == 0:
@@ -119,7 +121,7 @@ async def run(save_trajectory=True, land_on_point=False):
     await drone.action.arm()
 
     saving_traj = asyncio.ensure_future(save_trajectory_in_ned(drone, save_traj=save_trajectory))
-
+    await asyncio.sleep(2)
     
 
     print("[INFO] Take OFF")
