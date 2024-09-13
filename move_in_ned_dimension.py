@@ -18,6 +18,10 @@ import json
 
 # variables à modifier pour gestion du drone
 on_drone_reel = False
+where_to_go = (2, 2, 0)     # WARNING: North, East, Down /!\
+speed_when_move = 2
+save_trajectory = True
+land_on_point = True
 
 # initialisation des variables globales
 current_info = list()  # north_m, east_m, down_m, speed
@@ -61,7 +65,7 @@ async def move_in_ned_with_velocity(drone:System, aiming_pos, velocity, toleranc
         await asyncio.sleep(little_sleep)
 
 
-async def save_trajectory_in_ned(drone, save_traj=True, keep_one_on=2, backup=100):
+async def save_trajectory_in_ned(drone, save_traj=True, keep_one_on=1, backup=100):
     """
     :param: le backup est effectué tous les *backup* iterations
     :param: on garde une donnée sur *keep_one_on*
@@ -114,8 +118,7 @@ async def run(save_trajectory=True, land_on_point=False):
     print("[INFO] Arming")
     await drone.action.arm()
 
-    if save_trajectory:
-        saving_traj = asyncio.ensure_future(save_trajectory_in_ned(drone))
+    saving_traj = asyncio.ensure_future(save_trajectory_in_ned(drone, save_traj=save_trajectory))
 
     
 
@@ -143,7 +146,7 @@ async def run(save_trajectory=True, land_on_point=False):
         return
 
     try:
-        await move_in_ned_with_velocity(drone, (2, 2, 0), 2)
+        await move_in_ned_with_velocity(drone, where_to_go, speed_when_move)
         await asyncio.sleep(3)
         print("-- Stopping offboard")
         await drone.offboard.stop()
@@ -174,4 +177,4 @@ async def run(save_trajectory=True, land_on_point=False):
 
 if __name__ == "__main__":
     # Run the asyncio loop
-    asyncio.run(run())
+    asyncio.run(run(save_trajectory=save_trajectory, land_on_point=land_on_point))
