@@ -84,6 +84,35 @@ async def move_in_frd_with_velocity(drone:System, aiming_pos, velocity, toleranc
     await move_in_ned_with_velocity(drone, (along_north_axis, along_east_axis, aiming_pos[2]), velocity, tolerance, little_sleep)
     
 
+async def goto_in_ned_absolute(drone:System, drone_position_aim, velocity, tolerance=0.2, little_sleep=0.1)
+    pattern_velocity = lambda x: velocity if x > 1 else 0.5
+    # on recupere les coordonnees initiales du drone
+    get_position = lambda : current_info[:-1]
+    get_speed_norm = lambda : current_info[-1]
+
+    drone_position_init = get_position()
+    # on enregistre cette info même si save_traj==False (dans ce cas là, c'est juste que l'info ne sera pas enregistré)
+    historic["Info"] = [*drone_position_aim, velocity]
+    prev_time = time.time()
+    # puis on boucle jusqu'à ce qu'on y soit
+    while True:
+        drone_position_current = np.array(get_position())
+        
+        speed = get_speed_norm()
+        vecteur_dir = drone_position_aim - drone_position_current
+        distance_to_aim = np.linalg.norm(vecteur_dir)
+        print(f"[INFO] Distance to aim: {distance_to_aim}")
+        if distance_to_aim < tolerance:
+            await drone.offboard.set_position_ned(PositionNedYaw(drone_position_aim[0], drone_position_aim[1], drone_position_aim[2], 0.0))
+            print("[INFO] Should be arrived")
+            await asyncio.sleep(3)
+            break
+        vecteur_unit = vecteur_dir / np.linalg.norm(vecteur_dir)
+
+        # puis on dirige le groupe
+        next_position = drone_position_current + vecteur_unit * pattern_velocity(distance_to_aim)
+        await drone.offboard.set_position_ned(PositionNedYaw(next_position[0], next_position[1], next_position[2], 0.0))
+        await asyncio.sleep(little_sleep)
 
 async def save_trajectory_in_ned(drone, save_traj=True, keep_one_on=1, backup=100):
     """
