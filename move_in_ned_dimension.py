@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
 
 """
-Caveat when attempting to run the examples in non-gps environments:
-
-`drone.offboard.stop()` will return a `COMMAND_DENIED` result because it
-requires a mode switch to HOLD, something that is currently not supported in a
-non-gps environment.
-
-refer to following website to understand the algorithm : https://discuss.px4.io/t/offboard-mode-trajectory-setpoint/32850
+:auteur: Maxence BARRE
+:date: sept 2024
+:projet: nxp2024
+:commentaire: fichier en cours de test, permet de manipuler le drone dans une base NED à une vitesse choisie par le pilote
 """
 
+# importation des modules
 import asyncio
 import traceback
 from mavsdk import System
@@ -18,7 +16,10 @@ import time
 import numpy as np
 import json
 
+# variables à modifier pour gestion du drone
 on_drone_reel = False
+
+# initialisation des variables globales
 current_info = list()  # north_m, east_m, down_m, speed
 historic = {"north":list(), "east":list(), "down":list(), "speed":list()}
 
@@ -46,7 +47,7 @@ async def move_in_ned_with_velocity(drone:System, aiming_pos, velocity, toleranc
         speed = get_speed_norm()
         vecteur_dir = drone_position_aim - drone_position_current
         distance_to_aim = np.linalg.norm(vecteur_dir)
-        print(distance_to_aim)
+        print(f"[INFO] Distance to aim: {distance_to_aim}")
         if distance_to_aim < tolerance:
             await drone.offboard.set_position_ned(PositionNedYaw(drone_position_aim[0], drone_position_aim[1], drone_position_aim[2], 0.0))
             print("[INFO] Should be arrived")
@@ -85,27 +86,32 @@ async def save_trajectory_in_ned(drone, save_traj=True, keep_one_on=2, backup=10
 
 
 async def run(save_trajectory=True, land_on_point=False):
-    """ Does Offboard control using position NED coordinates. """
+    """
+    :param: save_trajectory: sauvegarde la trajectoire du drone dans un fichier .json pour tracage de la traj après
+    :param: land_on_point: si True: le drone atterit sur le point spécifier par le pilote; sera pratique pour vérifier la convergence de l'algo
+    """
 
     drone = System()
     if not on_drone_reel:
+        print("[INFO] Connection sur le simu")
         await drone.connect(system_address="udp://:14540")
     else:
+        print("[INFO] Connection sur le drone")
         await drone.connect(system_address="serial:///dev/ttyAMA0:57600")
 
-    print("Waiting for drone to connect...")
+    print("[INFO] Waiting for drone to connect...")
     async for state in drone.core.connection_state():
         if state.is_connected:
             print(f"-- Connected to drone!")
             break
 
-    print("Waiting for drone to have a global position estimate...")
+    print("[INFO] Waiting for drone to have a global position estimate...")
     async for health in drone.telemetry.health():
         if health.is_global_position_ok and health.is_home_position_ok:
             print("-- Global position estimate OK")
             break
 
-    print("-- Arming")
+    print("[INFO] Arming")
     await drone.action.arm()
 
     if save_trajectory:
@@ -113,18 +119,18 @@ async def run(save_trajectory=True, land_on_point=False):
 
     
 
-    print("--Take OFF")
+    print("[INFO] Take OFF")
     await drone.action.takeoff()
     await asyncio.sleep(10)
 
     print("[INFO] Wait before offboard")
     await asyncio.sleep(5)
 
-    print("-- Setting initial setpoint")
+    print("[INFO] Setting initial setpoint")
     await drone.offboard.set_position_ned(PositionNedYaw(*current_info[:-1], 0.0))
 
 
-    print("-- Starting offboard")
+    print("[INFO] Starting offboard")
     try:
         await drone.offboard.start()
         print("[INFO] Offboard started, wait...")
@@ -142,6 +148,7 @@ async def run(save_trajectory=True, land_on_point=False):
         print("-- Stopping offboard")
         await drone.offboard.stop()
         await drone.action.hold()
+        await asyncio.sleep(3)
     except Exception:
         traceback.print_exc()
     finally:
@@ -149,6 +156,7 @@ async def run(save_trajectory=True, land_on_point=False):
             print("[INFO] Returning to launch")
             await drone.action.return_to_launch()
         else: # if land on point
+            print("[INFO] Landing")
             await drone.action.land()
         
         async for in_air in drone.telemetry.in_air():
