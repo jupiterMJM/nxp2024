@@ -84,7 +84,7 @@ async def save_trajectory_in_ned(drone, save_traj=True, keep_one_on=2, backup=10
         
 
 
-async def run(save_trajectory=True):
+async def run(save_trajectory=True, land_on_point=False):
     """ Does Offboard control using position NED coordinates. """
 
     drone = System()
@@ -141,11 +141,15 @@ async def run(save_trajectory=True):
         await asyncio.sleep(3)
         print("-- Stopping offboard")
         await drone.offboard.stop()
+        await drone.action.hold()
     except Exception:
         traceback.print_exc()
     finally:
-        print("[INFO] Returning to launch")
-        await drone.action.return_to_launch()
+        if not land_on_point:
+            print("[INFO] Returning to launch")
+            await drone.action.return_to_launch()
+        else: # if land on point
+            await drone.action.land()
         
         async for in_air in drone.telemetry.in_air():
             if not in_air:
