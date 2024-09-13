@@ -1,3 +1,8 @@
+"""
+programme de test;
+il s'agit de vérifier que angle=0 <=> le drone pointe plein nord
+"""
+
 #Importation des bibliothèques
 import asyncio
 from mavsdk import System
@@ -26,32 +31,31 @@ async def run():
             print(f"[INFO] Connected to drone!")
             break
     
-    #Programation de l'altitude voulue pour le décollage
-    drone.action.set_takeoff_altitude(1.5)
+    # #Programation de l'altitude voulue pour le décollage
+    # drone.action.set_takeoff_altitude(1.5)
     
-    print("[INFO] Arming")
-    await drone.action.arm()
+    # print("[INFO] Arming")
+    # await drone.action.arm()
     
-    #Décollage du drone
-    print("[INFO] Taking off")
-    await drone.action.takeoff()
+    # #Décollage du drone
+    # print("[INFO] Taking off")
+    # await drone.action.takeoff()
 
-    await asyncio.sleep(5)
+    # await asyncio.sleep(5)
     #Test de hold dans le take_off, partie a cammenter si besoin
     ##################################################################
-    async for position_ned in drone.telemetry.position_velocity_ned():
-        print(position_ned.position)
-        await asyncio.sleep(1)  # Fetch the position every 1 second
-        break
+    async for heading_data in drone.telemetry.heading():
+        heading_angle = heading_data.heading_deg  # Get the heading in degrees
+        print(f"Current heading (angle relative to north): {heading_angle} degrees")
     ##################################################################
     
-    await asyncio.sleep(10) #temps en seconde avant de demander au drone de se poser
+    # await asyncio.sleep(10) #temps en seconde avant de demander au drone de se poser
     
-    #Atterissage
-    print("[INFO] Landing")
-    await drone.action.land()
+    # #Atterissage
+    # print("[INFO] Landing")
+    # await drone.action.land()
     
-    await asyncio.get_event_loop().shutdown_asyncgens()
+    # await asyncio.get_event_loop().shutdown_asyncgens()
 
 
 
