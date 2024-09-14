@@ -20,14 +20,24 @@ print("[INFO] Cam ouverte")
 # init des variables globales
 frame = None
 ids, vecteur = None, None
-path_to_video = "video_cam.mp4"
 
+# gestion du flux video pour enregistrement des images (sous forme video)
+print("[INFO] Creation du fiichier sauvegarde de la video")
+path_to_video = "video_cam.mp4"
+frame = cap.capture_array()
+fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+fps = 30
+height = frame.shape[0]
+width = frame.shape[1]
+out = cv2.VideoWriter(path_to_video, int(fourcc), int(fps), (int(width), int(height)))
 
 async def recentrage_sur_aruco():
-    prev_frame = frame[0][0] 
-    while True:
-        if frame[0][0] == prev_frame:
+    prev_frame = frame[0][0]
+    for i in range(300):
+        print(prev_frame, frame[0][0])
+        if np.all(frame[0][0] != prev_frame):
             print(ids, vecteur)
+        prev_frame = frame[0][0]
         await asyncio.sleep(0.1)
 
 
@@ -67,11 +77,11 @@ async def prise_video_cam(extract_aruco=True):
     """
     global cap, out, frame, ids, vecteur
     while True:
-        await asyncio.sleep(1/frame)
+        await asyncio.sleep(1/fps)
         # Lire une frame de la vidéo
         frame = cap.capture_array()
         if extract_aruco:
-            ids, vecteur, corners = detect_aruco_on_image(frame)
+            ids, vecteur, corners = await detect_aruco_on_image(frame)
             frame = cv2.aruco.drawDetectedMarkers(frame.copy(), corners, ids)
         if path_to_video:
             out.write(frame)    # TODO: faire l'enregistrement du flux vidéo
@@ -85,8 +95,10 @@ async def run(): #Fonction principale
 
     print("[INFO] Activation de la vidéo!!!")
     recording_video_fut_task = asyncio.ensure_future(prise_video_cam(extract_aruco=True))
-    await asyncio.sleep(10)
+    await asyncio.sleep(5)
 
+    print("[INFO] simu recentrage")
+    await recentrage_sur_aruco()
                 
     # gestion de la fermeture de la vidéo
     print("[INFO] Fermeture de la vidéo")
@@ -94,3 +106,11 @@ async def run(): #Fonction principale
     out.release()
     print("[INFO] Programme terminé!!!")
     return
+    
+    
+if __name__ == "__main__":
+    try:
+        asyncio.run(run())
+    except Exception as error:
+        print(error)
+        cap.close()
