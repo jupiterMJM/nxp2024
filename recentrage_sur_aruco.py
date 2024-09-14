@@ -22,7 +22,6 @@ print("[INFO] Modules importés")
 # variables globales à modif pour gestion du programme
 on_drone_reel = True
 debuggage = False           # activer le mode debuggage pour faire des tests sans que le drone ne décolle (en gros, ca active juste la caméra et l'algo)
-want_aruco = True
 
 
 # initialisation des variables globales
@@ -43,13 +42,13 @@ print("[INFO] Creation du fiichier sauvegarde de la video")
 path_to_video = "video_cam.mp4"
 frame = cap.capture_array()
 fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-fps = 10
+fps = 30
 height = frame.shape[0]
 width = frame.shape[1]
 out = cv2.VideoWriter(path_to_video, int(fourcc), int(fps), (int(width), int(height)))
 
 
-async def goto_in_ned_absolute(drone:System, drone_position_aim, velocity, tolerance=0.2, little_sleep=0.1)
+async def goto_in_ned_absolute(drone:System, drone_position_aim, velocity, tolerance=0.2, little_sleep=0.1):
     pattern_velocity = lambda x: velocity if x > 1 else 0.5
     # on recupere les coordonnees initiales du drone
     get_position = lambda : current_info[:-1]
@@ -58,12 +57,9 @@ async def goto_in_ned_absolute(drone:System, drone_position_aim, velocity, toler
     drone_position_init = get_position()
     # on enregistre cette info même si save_traj==False (dans ce cas là, c'est juste que l'info ne sera pas enregistré)
     historic["Info"] = [*drone_position_aim, velocity]
-    prev_time = time.time()
     # puis on boucle jusqu'à ce qu'on y soit
     while True:
         drone_position_current = np.array(get_position())
-        
-        speed = get_speed_norm()
         vecteur_dir = drone_position_aim - drone_position_current
         distance_to_aim = np.linalg.norm(vecteur_dir)
         print(f"[INFO] Distance to aim: {distance_to_aim}")
@@ -179,8 +175,7 @@ async def recentrage_sur_aruco(drone:System, follow_aruco=False):  # precision d
     """
     await asyncio.sleep(1)
     print("[INFO] Recentrage sur aruco activé!!!!!")
-    async for frame in prise_video_cam():
-        ids, vecteur = detect_aruco_on_image(frame)
+    async for ids, vecteur in prise_video_cam(extract_aruco=True):
 
         if [2] in ids:
             last_time_qr_code_seen = current_info[:-1]          # cf move_in_ned function
@@ -192,22 +187,11 @@ async def recentrage_sur_aruco(drone:System, follow_aruco=False):  # precision d
         vecteur_norme = np.array(vecteur)/np.linalg.norm(vecteur)
         vecteur_consigne = 0.10 * vecteur_norme             # en gros on bouge de 10cm en 10cm
         # on fait bouger le drone
-        move_in_frd_with_velocity(drone, (vecteur_consigne[0], vecteur_consigne[1], 0), 0.5)
+        if not debuggage: move_in_frd_with_velocity(drone, (vecteur_consigne[0], vecteur_consigne[1], 0), 0.5)
 
         if not follow_aruco and np.linalg.norm(vecteur) < 0.1: # pas très bien mais à voir
             # on considère qu'on est au dessus du tag
             return
-
-
-
-
-
-    
-    
-    
-    
-    
-
 
 
 async def run(): #Fonction principale
@@ -221,6 +205,7 @@ async def run(): #Fonction principale
     else:
         print("[INFO] Connection sur simulation")
         await drone.connect()
+
     print("[INFO] Waiting for drone to connect...")
     async for state in drone.core.connection_state():
         if state.is_connected:
@@ -240,7 +225,7 @@ async def run(): #Fonction principale
     print("[INFO] Activation de la récolte des données NED")
     saving_traj_ensure_fut_task = asyncio.ensure_future(save_trajectory_in_ned(drone, save_traj=True))
     print("[INFO] Activation de la vidéo!!!")
-    recording_video_fut_task = asyncio.ensure_future(prise_video_cam())
+    recording_video_fut_task = asyncio.ensure_future(prise_video_cam(extract_aruco=True))
     await asyncio.sleep(2)
 
     if not debuggage:
@@ -275,7 +260,7 @@ async def run(): #Fonction principale
 
 
     
-async def prise_video_cam():
+async def prise_video_cam(extract_aruco=True):
     """
     fonction mise en ensure_future qui gère la prise de photo/vidéo
     :param: capture_video: if True: l'ensemble des photos prises sont enregistrées et sont sauvegardées sous un format de vidéo
@@ -285,9 +270,15 @@ async def prise_video_cam():
         await asyncio.sleep(1/frame)
         # Lire une frame de la vidéo
         frame = cap.capture_array()
+        if extract_aruco:
+            ids, vecteur, corners = detect_aruco_on_image(frame)
+            frame = cv2.aruco.drawDetectedMarkers(frame.copy(), corners, ids)
         if path_to_video:
             out.write(frame)    # TODO: faire l'enregistrement du flux vidéo
-        yield frame
+        if extract_aruco:
+            yield ids, vecteur
+        else:
+            yield frame
 
 
 
@@ -318,8 +309,7 @@ async def detect_aruco_on_image(frame):
             centre_x = int((max(list_x) + min(list_x))/2) - frame.shape[1]//2
             centre_y = int((max(list_y) + min(list_y))/2) - frame.shape[0]//2
             vecteur = (centre_x, centre_y)
-            print("before return")
-    return ids, vecteur
+    return ids, vecteur, corners
 
 
 
