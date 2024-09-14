@@ -20,9 +20,13 @@ import json
 print("[INFO] Modules importés")
 
 # variables globales à modif pour gestion du programme
-on_drone_reel = True
-debuggage = False           # activer le mode debuggage pour faire des tests sans que le drone ne décolle (en gros, ca active juste la caméra et l'algo)
+try_connection_with_drone = False       # indique s'il faut se connecter au drone; mettre à False quand il faut juste faire des tests de caméra
+on_drone_reel = True                    # indique si on se connecte au simu ou au drone
+debuggage = False                       # activer le mode debuggage pour faire des tests sans que le drone ne décolle (en gros, ca active juste la caméra et l'algo)
 
+
+# au cas où....
+debuggage = debuggage and try_connection_with_drone
 
 # initialisation des variables globales
 current_info = list()  # north_m, east_m, down_m, speed
@@ -46,6 +50,10 @@ fps = 30
 height = frame.shape[0]
 width = frame.shape[1]
 out = cv2.VideoWriter(path_to_video, int(fourcc), int(fps), (int(width), int(height)))
+
+# initialisation des variables globales nécessaires au programme
+frame = cap.capture_array()
+ids, vecteur = None, None
 
 
 async def goto_in_ned_absolute(drone:System, drone_position_aim, velocity, tolerance=0.2, little_sleep=0.1):
@@ -175,23 +183,27 @@ async def recentrage_sur_aruco(drone:System, follow_aruco=False):  # precision d
     """
     await asyncio.sleep(1)
     print("[INFO] Recentrage sur aruco activé!!!!!")
-    async for ids, vecteur in prise_video_cam(extract_aruco=True):
+    prev_frame = frame[0][0]
+    while True:
+        if np.all(prev_frame != frame[0][0]):       # cad si l'image a été update
+            prev_frame = frame[0][0]
+            if [2] in ids:
+                last_time_qr_code_seen = current_info[:-1]          # cf move_in_ned function
+            else:
+                if not None in last_time_qr_code_seen:
+                    print("[INFO] Aruco perdu; retour à la dernière position connue")
+                    await goto_in_ned_absolute(drone, last_time_qr_code_seen)
+                    await asyncio.sleep(5)
+                continue
 
-        if [2] in ids:
-            last_time_qr_code_seen = current_info[:-1]          # cf move_in_ned function
-        else:
-            if not None in last_time_qr_code_seen:
-                goto_in_ned_absolute(drone, last_time_qr_code_seen)
-            continue
+            vecteur_norme = np.array(vecteur)/np.linalg.norm(vecteur)
+            vecteur_consigne = 0.10 * vecteur_norme             # en gros on bouge de 10cm en 10cm
+            # on fait bouger le drone
+            if not debuggage: move_in_frd_with_velocity(drone, (vecteur_consigne[0], vecteur_consigne[1], 0), 0.5)
 
-        vecteur_norme = np.array(vecteur)/np.linalg.norm(vecteur)
-        vecteur_consigne = 0.10 * vecteur_norme             # en gros on bouge de 10cm en 10cm
-        # on fait bouger le drone
-        if not debuggage: move_in_frd_with_velocity(drone, (vecteur_consigne[0], vecteur_consigne[1], 0), 0.5)
-
-        if not follow_aruco and np.linalg.norm(vecteur) < 0.1: # pas très bien mais à voir
-            # on considère qu'on est au dessus du tag
-            return
+            if not follow_aruco and np.linalg.norm(vecteur) < 0.1: # pas très bien mais à voir
+                # on considère qu'on est au dessus du tag
+                return
 
 
 async def run(): #Fonction principale
@@ -199,36 +211,37 @@ async def run(): #Fonction principale
 
     drone = System()
     #Connection avec le drone
-    if on_drone_reel:
-        print("[INFO] Connection sur le drone réel!!!")
-        await drone.connect(system_address="serial:///dev/ttyAMA0:57600")
-    else:
-        print("[INFO] Connection sur simulation")
-        await drone.connect()
+    if try_connection_with_drone:
+        if on_drone_reel:
+            print("[INFO] Connection sur le drone réel!!!")
+            await drone.connect(system_address="serial:///dev/ttyAMA0:57600")
+        else:
+            print("[INFO] Connection sur simulation")
+            await drone.connect()
 
-    print("[INFO] Waiting for drone to connect...")
-    async for state in drone.core.connection_state():
-        if state.is_connected:
-            print(f"[INFO] Connected to drone!")
-            break
+        print("[INFO] Waiting for drone to connect...")
+        async for state in drone.core.connection_state():
+            if state.is_connected:
+                print(f"[INFO] Connected to drone!")
+                break
 
-    #Calibration de l'altitude du RTL -> hyper important
-    print('[INFO] Set Return to launch altitude')
-    await drone.action.set_return_to_launch_altitude(1)
-    await drone.action.set_takeoff_altitude(6)
+        #Calibration de l'altitude du RTL -> hyper important
+        print('[INFO] Set Return to launch altitude')
+        await drone.action.set_return_to_launch_altitude(1)
+        await drone.action.set_takeoff_altitude(6)
 
-    if not debuggage:
-        #Armement du drone
-        print("[INFO] Arming")
-        await drone.action.arm()
+        if not debuggage:
+            #Armement du drone
+            print("[INFO] Arming")
+            await drone.action.arm()
 
-    print("[INFO] Activation de la récolte des données NED")
-    saving_traj_ensure_fut_task = asyncio.ensure_future(save_trajectory_in_ned(drone, save_traj=True))
+        print("[INFO] Activation de la récolte des données NED")
+        saving_traj_ensure_fut_task = asyncio.ensure_future(save_trajectory_in_ned(drone, save_traj=True))
     print("[INFO] Activation de la vidéo!!!")
     recording_video_fut_task = asyncio.ensure_future(prise_video_cam(extract_aruco=True))
     await asyncio.sleep(2)
 
-    if not debuggage:
+    if not debuggage and try_connection_with_drone:
         print("[INFO] Taking off")
         await drone.action.takeoff()
 
@@ -264,21 +277,18 @@ async def prise_video_cam(extract_aruco=True):
     """
     fonction mise en ensure_future qui gère la prise de photo/vidéo
     :param: capture_video: if True: l'ensemble des photos prises sont enregistrées et sont sauvegardées sous un format de vidéo
+    fonctnio 
     """
-    global cap, out
+    global cap, out, frame, ids, vecteur
     while True:
-        await asyncio.sleep(1/frame)
+        await asyncio.sleep(1/fps)
         # Lire une frame de la vidéo
         frame = cap.capture_array()
         if extract_aruco:
             ids, vecteur, corners = detect_aruco_on_image(frame)
             frame = cv2.aruco.drawDetectedMarkers(frame.copy(), corners, ids)
         if path_to_video:
-            out.write(frame)    # TODO: faire l'enregistrement du flux vidéo
-        if extract_aruco:
-            yield ids, vecteur
-        else:
-            yield frame
+            out.write(frame)
 
 
 
@@ -320,5 +330,7 @@ if __name__ == "__main__":
     try:
         # Run the asyncio loop
         asyncio.run(run())
-    except:
+    except Exception as error:
+        print(error)
+        out.release()
         cap.stop()
