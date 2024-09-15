@@ -17,16 +17,15 @@ import cv2
 from picamera2 import Picamera2
 import numpy as np
 import json
+from scipy.ndimage import rotate
 print("[INFO] Modules importés")
 
 # variables globales à modif pour gestion du programme
 try_connection_with_drone = False       # indique s'il faut se connecter au drone; mettre à False quand il faut juste faire des tests de caméra
 on_drone_reel = True                    # indique si on se connecte au simu ou au drone
-debuggage = False                       # activer le mode debuggage pour faire des tests sans que le drone ne décolle (en gros, ca active juste la caméra et l'algo)
+debuggage = True                       # activer le mode debuggage pour faire des tests sans que le drone ne décolle (en gros, ca active juste la caméra et l'algo)
 
 
-# au cas où....
-debuggage = debuggage and try_connection_with_drone
 
 # initialisation des variables globales
 current_info = list()  # north_m, east_m, down_m, speed
@@ -37,6 +36,9 @@ last_time_qr_code_seen = [None, None, None]
 print("[INFO] Allumage de la cam")
 cap = Picamera2()
 cap.preview_configuration.main.format = "RGB888"
+
+
+# Demarrer l'apercu de la camera
 cap.start()
 print("[INFO] Cam ouverte")
 
@@ -44,15 +46,16 @@ print("[INFO] Cam ouverte")
 # gestion du flux vidéo pour enregistrement des images (sous forme vidéo)
 print("[INFO] Creation du fiichier sauvegarde de la video")
 path_to_video = "video_cam.mp4"
-frame = cap.capture_array()
+frame = cv2.rotate(cap.capture_array(), cv2.ROTATE_90_COUNTERCLOCKWISE)
 fourcc = cv2.VideoWriter_fourcc(*'mp4v')
 fps = 30
 height = frame.shape[0]
 width = frame.shape[1]
 out = cv2.VideoWriter(path_to_video, int(fourcc), int(fps), (int(width), int(height)))
+print(f"[INFO] Shape of video: {height}x{width} pixel")
 
 # initialisation des variables globales nécessaires au programme
-frame = cap.capture_array()
+frame = cv2.rotate(cap.capture_array(), cv2.ROTATE_90_COUNTERCLOCKWISE)
 ids, vecteur = None, None
 
 
@@ -172,7 +175,7 @@ async def save_trajectory_in_ned(drone, save_traj=True, keep_one_on=1, backup=10
                 print("[INFO] Trajectory saved (backup)")
 
 
-async def recentrage_sur_aruco(drone:System, follow_aruco=False):  # precision de 10 cm (à voir pour augmenter si on ne converge pas)
+async def recentrage_sur_aruco(drone:System, follow_aruco=False, verbose=True):  # precision de 10 cm (à voir pour augmenter si on ne converge pas)
     """
     permet le recentrage du drone sur l'aruco
     :rq: on utilise la vitesse pour se recentrer sur le drone; c'est pas ouf mais c'est tout ce que l'on a
@@ -181,29 +184,34 @@ async def recentrage_sur_aruco(drone:System, follow_aruco=False):  # precision d
     :rq: ATTENTION, le DRONE NE DOIT PAS ETRE EN MODE OFFBOARD AVANT LE DEBUT DE LA FONCTION!!!!
     :rq: en sortie de la fonction, le mode offboard EST AUTOMATIQUEMENT DESACTIVE!!!!
     """
+    global last_time_qr_code_seen
     await asyncio.sleep(1)
     print("[INFO] Recentrage sur aruco activé!!!!!")
     prev_frame = frame[0][0]
     while True:
+        #print(f"[INFO] {prev_frame} {frame[0][0]}")
         if np.all(prev_frame != frame[0][0]):       # cad si l'image a été update
             prev_frame = frame[0][0]
-            if [2] in ids:
+            if ids is not None and [2] in ids:
                 last_time_qr_code_seen = current_info[:-1]          # cf move_in_ned function
             else:
-                if not None in last_time_qr_code_seen:
+                if not None in last_time_qr_code_seen and not debuggage:
                     print("[INFO] Aruco perdu; retour à la dernière position connue")
                     await goto_in_ned_absolute(drone, last_time_qr_code_seen)
                     await asyncio.sleep(5)
                 continue
 
             vecteur_norme = np.array(vecteur)/np.linalg.norm(vecteur)
+            if verbose: print(f"Aruco detected along {vecteur_norme} at {np.linalg.norm(vecteur)}")
             vecteur_consigne = 0.10 * vecteur_norme             # en gros on bouge de 10cm en 10cm
             # on fait bouger le drone
             if not debuggage: move_in_frd_with_velocity(drone, (vecteur_consigne[0], vecteur_consigne[1], 0), 0.5)
 
-            if not follow_aruco and np.linalg.norm(vecteur) < 0.1: # pas très bien mais à voir
+            if not follow_aruco and np.linalg.norm(vecteur) < 50: # pas très bien mais à voir
                 # on considère qu'on est au dessus du tag
+                print("[INFO] Au dessus de l'Aruco!!!")
                 return
+        await asyncio.sleep(0.1)
 
 
 async def run(): #Fonction principale
@@ -244,10 +252,13 @@ async def run(): #Fonction principale
     if not debuggage and try_connection_with_drone:
         print("[INFO] Taking off")
         await drone.action.takeoff()
+        await asyncio.sleep(10)
 
-        #Tache à executer
-        await recentrage_sur_aruco(drone)           # WARNING, pas très sur de ce qu'il se passe à ce moment là!!!
+    #Tache à executer
+    print("[INFO] Lancement de la tache a executer")
+    await recentrage_sur_aruco(drone)           # WARNING, pas très sur de ce qu'il se passe à ce moment là!!!
 
+    if not debuggage and try_connection_with_drone:
         print("[INFO] RTL activé")
         # il faut éteindre après l'atterissage
         await drone.action.return_to_launch()
@@ -263,6 +274,7 @@ async def run(): #Fonction principale
                 print("[INFO] Disarming")
                 await drone.action.disarm()
                 
+
     # gestion de la fermeture de la vidéo
     print("[INFO] Fermeture de la vidéo")
     recording_video_fut_task.cancel()
@@ -283,9 +295,9 @@ async def prise_video_cam(extract_aruco=True):
     while True:
         await asyncio.sleep(1/fps)
         # Lire une frame de la vidéo
-        frame = cap.capture_array()
+        frame = cv2.rotate(cap.capture_array(), cv2.ROTATE_90_COUNTERCLOCKWISE)
         if extract_aruco:
-            ids, vecteur, corners = detect_aruco_on_image(frame)
+            ids, vecteur, corners = await detect_aruco_on_image(frame)
             frame = cv2.aruco.drawDetectedMarkers(frame.copy(), corners, ids)
         if path_to_video:
             out.write(frame)
@@ -306,7 +318,7 @@ async def detect_aruco_on_image(frame):
     vecteur = None
 
     if ids is not None:
-        print(f"[INFo] Aruco detected {ids}")
+        #print(f"[INFo] Aruco detected {ids}")
         # Recherche le centre de l'aruco
         if [2] in ids:
             num = np.where(ids == [2])[0][0]
@@ -331,6 +343,11 @@ if __name__ == "__main__":
         # Run the asyncio loop
         asyncio.run(run())
     except Exception as error:
+        print("[ERROR] A l'interieur de l'except")
         print(error)
+        out.release()
+        cap.stop()
+    finally:
+        print("[FINALLY]")
         out.release()
         cap.stop()
